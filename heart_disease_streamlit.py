@@ -23,19 +23,19 @@ plt.rcParams["figure.figsize"] = (8, 6)
 @st.cache_data
 def load_data():
     try:
-        df_original = pd.read_csv('heart_disease_original.csv')
+        df_original = pd.read_csv('data/heart_disease_original.csv')
     except FileNotFoundError:
         st.error("Please ensure 'heart_disease_original.csv' exists in the same directory!")
         df_original = None
     
     try:
-        df_simple = pd.read_csv('heart_disease_simple_imputation.csv')
+        df_simple = pd.read_csv('data/heart_disease_simple_imputation.csv')
     except FileNotFoundError:
         st.error("Please ensure 'heart_disease_simple_imputation.csv' exists!")
         df_simple = None
         
     try:
-        df_knn = pd.read_csv('heart_disease_knn_imputation.csv')
+        df_knn = pd.read_csv('data/heart_disease_knn_imputation.csv')
     except FileNotFoundError:
         st.error("Please ensure 'heart_disease_knn_imputation.csv' exists!")
         df_knn = None
