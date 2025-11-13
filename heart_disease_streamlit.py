@@ -202,6 +202,49 @@ elif page == "Data Explorer":
     
     st.info("Viewing: **Original Dataset** (before imputation)")
     
+    # Target Variable Encoding Explanation
+    st.header("🎯 Target Variable Encoding")
+    st.write("""
+    The target variable represents heart disease diagnosis. The original dataset contained a 
+    multi-level variable (`num`) with values 0-4, which was encoded into a binary classification:
+    """)
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("### Original Variable: `num`")
+        st.markdown("""
+        **Description of num variable:**
+        
+        - **Value 0**: No vessels with >50% diameter narrowing (absence of significant disease)
+        - **Value 1**: 1 major vessel with >50% diameter narrowing
+        - **Value 2**: 2 major vessels with >50% diameter narrowing
+        - **Value 3**: 3 major vessels with >50% diameter narrowing
+        - **Value 4**: 4 major vessels with >50% diameter narrowing
+        """)
+    
+    with col2:
+        st.markdown("### Encoding Logic")
+        st.code("""
+# Encoding values 1-4 as "1" (heart disease present)
+# All these values signify heart risk as at least 
+# 1 major vessel has >50% diameter narrowing
+
+df["target"] = np.where(
+    df["num"].isin([1, 2, 3, 4]), 
+    1,  # Heart disease present
+    0   # No heart disease
+)
+        """, language="python")
+        
+        st.info("""
+        **Binary Target Variable:**
+        - **0**: No heart disease (num = 0)
+        - **1**: Heart disease present (num = 1, 2, 3, or 4)
+        """)
+    
+    st.markdown("---")
+    
     # Age Distribution with Slider
     st.header("📊 Age Distribution Analysis")
     st.write("Use the slider to filter patients by age range and explore disease prevalence:")
@@ -325,6 +368,26 @@ elif page == "EDA - Univariate Analysis":
         st.stop()
     
     st.info("Viewing: **Original Dataset** (before imputation)")
+    
+    # Summary Statistics Section
+    st.header("📋 Summary Statistics")
+    st.write("Overview of the dataset's quantitative and qualitative variables:")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Quantitative Variables")
+        quant_summary = df_original[numeric_cols].describe()
+        st.dataframe(quant_summary.style.format("{:.2f}"), use_container_width=True)
+    
+    with col2:
+        st.subheader("Qualitative Variables")
+        # Convert to string type to get categorical statistics (count, unique, top, freq)
+        qual_data = df_original[categorical_cols].astype(str)
+        qual_summary = qual_data.describe()
+        st.dataframe(qual_summary, use_container_width=True)
+    
+    st.markdown("---")
     
     # Numeric Features
     st.header("Distribution of Quantitative Variables")
