@@ -7,6 +7,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from statsmodels.api import Logit
+from statsmodels.tools import add_constant
+from scipy import stats
 
 # Page configuration
 st.set_page_config(
@@ -54,7 +57,7 @@ st.sidebar.title("🫀 Navigation")
 page = st.sidebar.radio(
     "Go to", 
     ["Home", "Data Explorer", "EDA - Univariate Analysis", "Pair-Plot Analysis", 
-     "Missingness Analysis", "Correlation Analysis"]
+     "Missingness Analysis", "Correlation Analysis", "Logistic Regression Analysis"]
 )
 
 # HOME PAGE
@@ -965,6 +968,344 @@ elif page == "Correlation Analysis":
     - **Moderate correlation**: 0.3 < |r| < 0.5
     - **Weak correlation**: |r| < 0.3
     """)
+
+
+# LOGISTIC REGRESSION ANALYSIS PAGE
+
+elif page == "Logistic Regression Analysis":
+    st.title("📊 Logistic Regression Analysis")
+    st.markdown("---")
+    
+    if df_original is None:
+        st.error("Original dataset not found!")
+        st.stop()
+    
+    st.info("""
+    This page fits a logistic regression model using the **5 predictors with the highest 
+    absolute correlation** with the target variable (heart disease diagnosis).
+    
+    **Note:** This analysis uses the **original non-imputed data**. Missing data indicator 
+    variables (e.g., `chol_missing`, `ca_missing`) are excluded from consideration. Rows with 
+    missing values in the selected predictors will be excluded from the model.
+    """)
+    
+    # Use original dataset
+    df_analysis = df_original.copy()
+    dataset_name = "Original (Non-Imputed)"
+    
+    st.markdown("---")
+    
+    # Calculate correlations with target
+    st.subheader("🔍 Feature Selection: Top 5 Predictors")
+    
+    # Get all features except target and exclude missing data indicators
+    features = [col for col in df_analysis.columns 
+                if col != 'target' and not col.endswith('_missing')]
+    
+    # Calculate absolute correlations with target
+    correlations = {}
+    for feature in features:
+        corr_value = df_analysis[feature].corr(df_analysis['target'])
+        correlations[feature] = abs(corr_value)
+    
+    # Sort and get top 5
+    top_5_features = sorted(correlations.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_5_names = [feat[0] for feat in top_5_features]
+    
+    # Display top 5 features with their correlations
+    st.write(f"**Selected predictors based on {dataset_name} data:**")
+    
+    correlation_df = pd.DataFrame({
+        'Feature': [feat[0] for feat in top_5_features],
+        'Absolute Correlation with Target': [feat[1] for feat in top_5_features],
+        'Actual Correlation': [df_analysis[feat[0]].corr(df_analysis['target']) for feat in top_5_features]
+    })
+    correlation_df['Rank'] = range(1, 6)
+    correlation_df = correlation_df[['Rank', 'Feature', 'Actual Correlation', 'Absolute Correlation with Target']]
+    
+    st.dataframe(
+        correlation_df.style.format({
+            'Actual Correlation': '{:.4f}',
+            'Absolute Correlation with Target': '{:.4f}'
+        }).background_gradient(subset=['Absolute Correlation with Target'], cmap='YlOrRd'),
+        hide_index=True,
+        use_container_width=True
+    )
+    
+    st.markdown("---")
+    
+    # Fit logistic regression model
+    st.subheader("📈 Logistic Regression Model")
+    
+    # Prepare data and handle missing values
+    X = df_analysis[top_5_names]
+    y = df_analysis['target']
+    
+    # Create dataframe with predictors and target
+    model_data = pd.concat([X, y], axis=1)
+    
+    # Count observations before and after dropping missing
+    n_before = len(model_data)
+    model_data_clean = model_data.dropna()
+    n_after = len(model_data_clean)
+    n_dropped = n_before - n_after
+    
+    # Display data info
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Original Observations", n_before)
+    with col2:
+        st.metric("Complete Cases", n_after)
+    with col3:
+        st.metric("Excluded (Missing)", n_dropped)
+    
+    if n_after < 30:
+        st.warning(f"⚠️ Only {n_after} complete observations available. Results may be unreliable.")
+    
+    st.markdown("---")
+    
+    # Split back into X and y for modeling
+    X = model_data_clean[top_5_names]
+    y = model_data_clean['target']
+    
+    # Add constant term for intercept
+    X_with_const = add_constant(X)
+    
+    # Fit the model
+    logit_model = Logit(y, X_with_const)
+    result = logit_model.fit(disp=0)  # disp=0 to suppress iteration output
+    
+    # Model Summary Statistics
+    st.write("### 📋 Model Summary Statistics")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Pseudo R²", f"{result.prsquared:.4f}")
+    with col2:
+        st.metric("Log-Likelihood", f"{result.llf:.2f}")
+    with col3:
+        st.metric("AIC", f"{result.aic:.2f}")
+    with col4:
+        st.metric("BIC", f"{result.bic:.2f}")
+    
+    st.markdown("---")
+    
+    # Coefficient Estimates Table
+    st.write("### 📊 Coefficient Estimates and Statistical Tests")
+    
+    # Create a comprehensive results dataframe
+    results_df = pd.DataFrame({
+        'Variable': result.params.index,
+        'Coefficient (β)': result.params.values,
+        'Std Error': result.bse.values,
+        'z-value': result.tvalues.values,
+        'P-value': result.pvalues.values,
+        'CI Lower (95%)': result.conf_int()[0].values,
+        'CI Upper (95%)': result.conf_int()[1].values
+    })
+    
+    # Add significance stars
+    def add_significance_stars(p_val):
+        if p_val < 0.001:
+            return '***'
+        elif p_val < 0.01:
+            return '**'
+        elif p_val < 0.05:
+            return '*'
+        elif p_val < 0.1:
+            return '.'
+        else:
+            return ''
+    
+    results_df['Significance'] = results_df['P-value'].apply(add_significance_stars)
+    
+    # Style the dataframe
+    def color_pvalues(val):
+        if val < 0.001:
+            return 'background-color: #d4edda; font-weight: bold'
+        elif val < 0.01:
+            return 'background-color: #d1ecf1; font-weight: bold'
+        elif val < 0.05:
+            return 'background-color: #fff3cd'
+        elif val < 0.1:
+            return 'background-color: #f8f9fa'
+        else:
+            return ''
+    
+    styled_results = results_df.style.format({
+        'Coefficient (β)': '{:.6f}',
+        'Std Error': '{:.6f}',
+        'z-value': '{:.4f}',
+        'P-value': '{:.6f}',
+        'CI Lower (95%)': '{:.6f}',
+        'CI Upper (95%)': '{:.6f}'
+    }).applymap(color_pvalues, subset=['P-value'])
+    
+    st.dataframe(styled_results, hide_index=True, use_container_width=True)
+    
+    st.caption("""
+    **Significance codes:** *** p < 0.001, ** p < 0.01, * p < 0.05, . p < 0.1
+    
+    **Interpretation:** The coefficient (β) represents the change in log-odds of heart disease 
+    for a one-unit increase in the predictor, holding all other variables constant.
+    """)
+    
+    st.markdown("---")
+    
+    # Odds Ratios
+    st.write("### 🎯 Odds Ratios (Exponentiated Coefficients)")
+    
+    st.info("""
+    **What are Odds Ratios?**
+    
+    Odds ratios are the exponentiated coefficients (e^β) and provide a more interpretable 
+    measure of the effect size:
+    - **OR = 1**: No effect on odds of heart disease
+    - **OR > 1**: Increased odds of heart disease (e.g., OR = 2 means odds doubled)
+    - **OR < 1**: Decreased odds of heart disease (e.g., OR = 0.5 means odds halved)
+    """)
+    
+    # Calculate odds ratios
+    odds_ratios_df = pd.DataFrame({
+        'Variable': result.params.index,
+        'Coefficient (β)': result.params.values,
+        'Odds Ratio (e^β)': np.exp(result.params.values),
+        'OR CI Lower (95%)': np.exp(result.conf_int()[0].values),
+        'OR CI Upper (95%)': np.exp(result.conf_int()[1].values),
+        'P-value': result.pvalues.values,
+        'Significance': results_df['Significance']
+    })
+    
+    # Add interpretation column
+    def interpret_or(row):
+        if row['Variable'] == 'const':
+            return 'Baseline odds when all predictors = 0'
+        or_val = row['Odds Ratio (e^β)']
+        p_val = row['P-value']
+        
+        if p_val >= 0.05:
+            return 'Not statistically significant'
+        
+        if or_val > 1:
+            pct_increase = (or_val - 1) * 100
+            return f'{pct_increase:.1f}% increase in odds per unit increase'
+        else:
+            pct_decrease = (1 - or_val) * 100
+            return f'{pct_decrease:.1f}% decrease in odds per unit increase'
+    
+    odds_ratios_df['Interpretation'] = odds_ratios_df.apply(interpret_or, axis=1)
+    
+    # Style odds ratios table
+    styled_or = odds_ratios_df.style.format({
+        'Coefficient (β)': '{:.6f}',
+        'Odds Ratio (e^β)': '{:.4f}',
+        'OR CI Lower (95%)': '{:.4f}',
+        'OR CI Upper (95%)': '{:.4f}',
+        'P-value': '{:.6f}'
+    }).applymap(color_pvalues, subset=['P-value'])
+    
+    st.dataframe(styled_or, hide_index=True, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Visualization of Odds Ratios
+    st.write("### 📊 Odds Ratios Visualization")
+    
+    # Filter out intercept for visualization
+    or_plot_df = odds_ratios_df[odds_ratios_df['Variable'] != 'const'].copy()
+    or_plot_df = or_plot_df.sort_values('Odds Ratio (e^β)')
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Create forest plot
+    y_pos = np.arange(len(or_plot_df))
+    
+    # Plot odds ratios
+    colors = ['red' if p < 0.05 else 'gray' for p in or_plot_df['P-value']]
+    ax.scatter(or_plot_df['Odds Ratio (e^β)'], y_pos, s=100, c=colors, alpha=0.7, zorder=3)
+    
+    # Plot confidence intervals
+    for i, (idx, row) in enumerate(or_plot_df.iterrows()):
+        ax.plot([row['OR CI Lower (95%)'], row['OR CI Upper (95%)']], 
+                [i, i], 'k-', linewidth=2, alpha=0.5)
+    
+    # Add reference line at OR = 1
+    ax.axvline(x=1, color='blue', linestyle='--', linewidth=2, alpha=0.7, label='OR = 1 (No Effect)')
+    
+    # Formatting
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(or_plot_df['Variable'])
+    ax.set_xlabel('Odds Ratio (95% CI)', fontsize=12, fontweight='bold')
+    ax.set_title(f'Odds Ratios for Heart Disease Risk\n({dataset_name})', 
+                 fontsize=14, fontweight='bold', pad=20)
+    ax.grid(True, alpha=0.3, axis='x')
+    ax.legend(loc='best')
+    
+    # Add color legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='red', alpha=0.7, label='Significant (p < 0.05)'),
+        Patch(facecolor='gray', alpha=0.7, label='Not Significant (p ≥ 0.05)')
+    ]
+    ax.legend(handles=legend_elements, loc='best', framealpha=0.9)
+    
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close()
+    
+    st.markdown("---")
+    
+    # Model Interpretation Summary
+    st.write("### 📝 Key Findings")
+    
+    st.info(f"""
+    **Analysis Note:** This model is fit on **{n_after} complete cases** from the original dataset 
+    (excluding {n_dropped} observations with missing values in the selected predictors).
+    """)
+    
+    # Identify significant predictors
+    sig_predictors = results_df[
+        (results_df['P-value'] < 0.05) & (results_df['Variable'] != 'const')
+    ].sort_values('P-value')
+    
+    if len(sig_predictors) > 0:
+        st.success(f"**Statistically Significant Predictors:** {len(sig_predictors)} out of {len(top_5_names)}")
+        
+        for idx, row in sig_predictors.iterrows():
+            var_name = row['Variable']
+            coef = row['Coefficient (β)']
+            p_val = row['P-value']
+            or_val = np.exp(coef)
+            
+            if or_val > 1:
+                direction = "increases"
+                pct_change = (or_val - 1) * 100
+            else:
+                direction = "decreases"
+                pct_change = (1 - or_val) * 100
+            
+            st.write(f"""
+            **{var_name}**: A one-unit increase in {var_name} {direction} the odds of heart 
+            disease by {pct_change:.1f}% (OR = {or_val:.3f}, p = {p_val:.6f}).
+            """)
+    else:
+        st.warning("No statistically significant predictors at the α = 0.05 level.")
+    
+    st.markdown("---")
+    
+    # Additional model diagnostics
+    with st.expander("📊 Additional Model Diagnostics"):
+        st.write("### Full Model Summary")
+        st.text(result.summary())
+        
+        st.write("### Likelihood Ratio Test")
+        st.write(f"**LR statistic:** {result.llr:.4f}")
+        st.write(f"**LR p-value:** {result.llr_pvalue:.6f}")
+        
+        if result.llr_pvalue < 0.05:
+            st.success("The model is significantly better than the null model (intercept only).")
+        else:
+            st.warning("The model is not significantly better than the null model.")
 
 # FOOTER / SIDEBAR INFO
 
